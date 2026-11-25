@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>문래·도림·신도림 실거래가 대시보드 | 숫자로 읽는 경제</title>
+<title>서울 실거래가 대시보드 | 숫자로 읽는 경제</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
   /* ── 색상: 블로그(숫자로 읽는 경제)와 같은 남색·파랑·금색 ── */
@@ -19,12 +19,17 @@
   header h1{margin:0 0 4px;font-size:20px}
   header p{margin:0;font-size:13px;opacity:.85}
 
-  /* 선택 버튼 줄 */
-  .bar{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
-  .bar .lbl{font-size:12px;color:var(--sub);width:100%;margin-bottom:-2px}
+  /* 지역 선택 */
+  .pick{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0 6px}
+  .pick select{font-size:15px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--text);min-width:150px}
+  .pick select:disabled{background:#f3f4f6;color:#9ca3af}
+  .lbl{font-size:12px;color:var(--sub);width:100%;margin-top:6px}
+  .bar{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}
   .bar button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 14px;font-size:14px;cursor:pointer;color:var(--text)}
   .bar button.on{background:var(--navy);border-color:var(--navy);color:#fff;font-weight:600}
   .bar.deal button.on{background:var(--blue);border-color:var(--blue)}
+  .hint{font-size:12px;color:var(--sub);margin:6px 0 0}
+  .hint a{color:var(--blue);cursor:pointer;text-decoration:underline}
 
   /* 숫자 카드 */
   .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}
@@ -36,15 +41,19 @@
 
   .box{border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
   .box h2{font-size:16px;margin:0 0 10px;padding-left:10px;border-left:4px solid var(--navy)}
+  .box h2 small{font-weight:400;color:var(--sub);font-size:12px;margin-left:6px}
   .chart-wrap{position:relative;height:300px}
 
   table{width:100%;border-collapse:collapse;font-size:13px}
-  th{background:var(--navy);color:#fff;font-weight:600;padding:8px 6px;text-align:left}
+  th{background:var(--navy);color:#fff;font-weight:600;padding:8px 6px;text-align:left;white-space:nowrap}
   td{padding:7px 6px;border-bottom:1px solid var(--line)}
   tr:nth-child(even) td{background:#fafbfc}
   td.num,th.num{text-align:right}
   .tbl{overflow-x:auto}
   .cx{color:var(--sub);text-decoration:line-through}
+  tr.click{cursor:pointer}
+  tr.click:hover td{background:#eef4fb}
+  tr.few td{color:#9ca3af}
 
   .empty{padding:30px;text-align:center;color:var(--sub)}
   .note{font-size:12px;color:var(--sub);line-height:1.7}
@@ -54,6 +63,7 @@
     .cards{grid-template-columns:repeat(2,1fr)}
     .card .v{font-size:17px}
     .chart-wrap{height:240px}
+    .pick select{flex:1;min-width:0}
   }
 </style>
 </head>
@@ -61,14 +71,21 @@
 <div class="wrap">
 
   <header>
-    <h1>📊 문래·도림·신도림 실거래가 대시보드</h1>
+    <h1>📊 서울 실거래가 대시보드</h1>
     <p>국토교통부 실거래 신고 자료 · 매일 아침 자동 갱신 · <span id="updated">불러오는 중…</span></p>
   </header>
 
   <!-- 지역 / 주택유형 / 거래유형 선택 -->
-  <div class="bar" id="areaBar"><span class="lbl">지역</span></div>
-  <div class="bar" id="typeBar"><span class="lbl">주택 유형</span></div>
-  <div class="bar deal" id="dealBar"><span class="lbl">거래 유형</span></div>
+  <div class="lbl">지역</div>
+  <div class="pick">
+    <select id="guSel" aria-label="구 선택"></select>
+    <select id="dongSel" aria-label="동 선택"></select>
+  </div>
+  <div class="lbl">주택 유형</div>
+  <div class="bar" id="typeBar"></div>
+  <div class="lbl">거래 유형</div>
+  <div class="bar deal" id="dealBar"></div>
+  <p class="hint">고른 설정은 이 브라우저에 저장되어 다음 방문 때 바로 보입니다. <a id="resetLink">처음 화면으로</a></p>
 
   <!-- 요약 카드 -->
   <div class="cards" id="cards"></div>
@@ -80,6 +97,12 @@
     <p class="note" id="chartNote"></p>
   </div>
 
+  <!-- 하위 지역 비교 (서울 → 구별, 구 → 동별) -->
+  <div class="box" id="compareBox">
+    <h2 id="compareTitle">구별 비교</h2>
+    <div class="tbl" id="compare"></div>
+  </div>
+
   <!-- 최근 거래 -->
   <div class="box">
     <h2>최근 신고된 거래</h2>
@@ -89,14 +112,14 @@
   <!-- 읽는 법 / 주의 -->
   <div class="box note">
     <b>읽는 법</b><br>
-    · 가격은 모두 <b>중위값</b>(거래를 가격순으로 세웠을 때 가운데 값)입니다. 거래가 적은 동네에서 한두 건에 평균이 크게 흔들리는 것을 줄이기 위해서입니다.<br>
-    · <b>3.3㎡당 가격</b>은 전용면적 기준입니다. 면적이 다른 집을 비교할 때 유용합니다.<br>
+    · 가격은 모두 <b>중위값</b>(거래를 가격순으로 세웠을 때 가운데 값)입니다. 비싼 거래 한두 건에 평균이 크게 흔들리는 것을 줄이기 위해서입니다.<br>
+    · <b>3.3㎡당 가격</b>은 전용면적 기준입니다. 넓이가 다른 집을 비교할 때 유용합니다.<br>
     · 변화율은 <b>최근 3개월 vs 직전 3개월</b>, <b>최근 3개월 vs 1년 전 같은 3개월</b>을 비교합니다. 월별 숫자보다 덜 흔들립니다.<br>
-    · 문래동은 문래동1가~6가를 합친 값입니다. 신도림동은 구로구 소속입니다.<br><br>
+    · 동은 법정동 기준이며, 문래동1가~6가처럼 나뉜 동은 하나로 합쳤습니다.<br><br>
     <b>주의</b><br>
     · 실거래는 <b>계약 후 30일 안에</b> 신고되므로, 최근 1~2개월은 거래가 아직 덜 잡혀 있습니다(그래프에서 옅게 표시). 시간이 지나며 숫자가 바뀝니다.<br>
     · 매물 사이트의 <b>호가가 아니라 실제 신고된 거래</b>입니다. 계약 해제된 매매는 집계에서 뺐습니다.<br>
-    · 거래가 적은 달·동네는 몇 건의 거래가 숫자를 크게 바꿀 수 있습니다. 거래 건수를 함께 보세요.<br>
+    · 거래가 적은 동네·달은 몇 건의 거래가 숫자를 크게 바꿀 수 있습니다(비교표에서 흐리게 표시). 거래 건수를 함께 보세요.<br>
     · 출처: 국토교통부 실거래가 공개시스템(공공데이터포털 Open API). 이 페이지는 정보 제공용이며 매수·매도 권유가 아닙니다.
   </div>
 
@@ -104,36 +127,98 @@
 
 <script>
 /* ───────── 설정 ───────── */
-const AREAS = ["문래동", "도림동", "신도림동", "영등포구 전체"];
 const TYPES = { apt: "아파트", offi: "오피스텔", rh: "연립다세대(빌라)" };
 const DEALS = { trade: "매매", jeonse: "전세", wolse: "월세" };
+const DEFAULT = { gu: "all", dong: "all", type: "apt", deal: "trade" };
+const STORE_KEY = "numeco-seoul-dash-v1";
+const FEW = 5;                         // 3개월 거래가 이보다 적으면 '표본 적음'
 
-let DATA = null;              // summary.json 내용
-let state = { area: "문래동", type: "apt", deal: "trade" };
+let INDEX = null, SEOUL = null;        // index.json, seoul.json
+const GU_CACHE = {};                   // 구 코드 → 구 파일 내용
+let state = { ...DEFAULT };
 let chart = null;
 
 /* ───────── 숫자 표시 도우미 ───────── */
-// 만원 단위 숫자를 "9억 2,500만" 식으로
-function won(v) {
+function won(v) {                      // 만원 → "9억 2,500만"
   if (v == null) return "-";
-  const eok = Math.floor(v / 10000), man = Math.round(v % 10000);
+  v = Math.round(v);
+  const eok = Math.floor(v / 10000), man = v % 10000;
   if (eok && man) return `${eok}억 ${man.toLocaleString()}만`;
   if (eok) return `${eok}억`;
   return `${man.toLocaleString()}만`;
 }
-// 변화율 표시 (+는 빨강, -는 파랑: 국내 시세 표시 관례)
-function pct(cur, prev) {
-  if (cur == null || prev == null || prev === 0) return '<span>-</span>';
-  const p = (cur / prev - 1) * 100;
+function pctNum(cur, prev) { return (cur == null || !prev) ? null : (cur / prev - 1) * 100; }
+function pct(p) {                      // +는 빨강, -는 파랑 (국내 시세 표시 관례)
+  if (p == null) return "<span>-</span>";
   const cls = p > 0 ? "up" : p < 0 ? "down" : "";
   const sign = p > 0 ? "▲" : p < 0 ? "▼" : "";
   return `<span class="${cls}">${sign} ${Math.abs(p).toFixed(1)}%</span>`;
 }
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-/* ───────── 월 목록 / 3개월 묶음 계산 ───────── */
-// summary 의 월별 객체를 빈 달 없이 정렬된 배열로
-function monthSeries(obj) {
-  const keys = Object.keys(obj).sort();
+/* ───────── 설정 저장 / 불러오기 ───────── */
+// 이 브라우저에만 저장된다. 저장이 막힌 환경(일부 사파리 등)에서는 조용히 넘어간다.
+function saveState() { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {} }
+function loadSaved() { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { return null; } }
+
+// 주소에 ?gu=양천구&dong=목동&type=apt&deal=jeonse 가 있으면 그 지역을 먼저 보여준다
+function fromUrl() {
+  const q = new URLSearchParams(location.search);
+  const out = {};
+  if (q.get("gu")) {
+    const g = INDEX.gu.find(x => x.code === q.get("gu") || x.name === q.get("gu"));
+    if (g) out.gu = g.code;
+    if (g && q.get("dong") && g.dongs.includes(q.get("dong"))) out.dong = q.get("dong");
+  }
+  if (TYPES[q.get("type")]) out.type = q.get("type");
+  if (DEALS[q.get("deal")]) out.deal = q.get("deal");
+  return Object.keys(out).length ? out : null;
+}
+
+// 저장된 값이 지금 데이터에 맞는지 확인 (없는 구·동이면 기본값으로)
+function sanitize(s) {
+  const st = { ...DEFAULT, ...s };
+  const g = INDEX.gu.find(x => x.code === st.gu);
+  if (!g) { st.gu = "all"; st.dong = "all"; }
+  else if (st.dong !== "all" && !g.dongs.includes(st.dong)) st.dong = "all";
+  if (!TYPES[st.type]) st.type = DEFAULT.type;
+  if (!DEALS[st.deal]) st.deal = DEFAULT.deal;
+  return st;
+}
+
+/* ───────── 데이터 읽기 ───────── */
+async function getJSON(path) {
+  const r = await fetch(path + "?v=" + encodeURIComponent(INDEX ? INDEX.updated : Date.now()));
+  if (!r.ok) throw new Error(path + " " + r.status);
+  return r.json();
+}
+async function loadGu(code) {
+  if (!GU_CACHE[code]) GU_CACHE[code] = await getJSON(`data/site/${code}.json`);
+  return GU_CACHE[code];
+}
+const guName = code => (INDEX.gu.find(g => g.code === code) || {}).name || code;
+
+// 지금 고른 지역의 { 이름, 시계열, 하위지역, 최근거래 }
+function currentNode() {
+  if (state.gu === "all") {
+    return { name: "서울 전체", series: SEOUL.series, children: SEOUL.children,
+             childLabel: "구별", childName: guName, childKey: "gu", recent: SEOUL.recent };
+  }
+  const G = GU_CACHE[state.gu];
+  if (state.dong === "all") {
+    return { name: guName(state.gu), series: G.series, children: G.children,
+             childLabel: "동별", childName: d => d, childKey: "dong", recent: G.recent };
+  }
+  const key = d => (d || "").replace(/\d+가$/, "");  // 문래동3가 → 문래동
+  const filt = arr => arr.filter(r => key(r.dong) === state.dong);
+  const rec = {};
+  for (const t in G.recent) rec[t] = { trade: filt(G.recent[t].trade), rent: filt(G.recent[t].rent) };
+  return { name: `${guName(state.gu)} ${state.dong}`, series: G.children[state.dong], children: null, recent: rec };
+}
+
+/* ───────── 계산 도우미 ───────── */
+function monthSeries(obj) {             // {월: 통계} → 빈 달 없이 정렬된 배열
+  const keys = Object.keys(obj || {}).sort();
   if (!keys.length) return [];
   const out = [];
   let [y, m] = keys[0].split("-").map(Number);
@@ -146,79 +231,88 @@ function monthSeries(obj) {
   }
   return out;
 }
-// 여러 달을 거래 건수로 가중 평균 (중위값의 근사 묶음)
-function pooled(rows, field) {
+function pooled(rows, field) {          // 여러 달 중위값을 거래 건수로 가중 평균
   let s = 0, n = 0;
   rows.forEach(r => { if (r[field] != null && r.n) { s += r[field] * r.n; n += r.n; } });
   return n ? s / n : null;
 }
+const mainField = () => state.deal === "wolse" ? "rent" : "ppy";
+const priceField = () => state.deal === "trade" ? "price" : "deposit";
 
-/* ───────── 화면 그리기 ───────── */
-function drawButtons() {
-  const mk = (barId, items, key) => {
-    const bar = document.getElementById(barId);
-    bar.querySelectorAll("button").forEach(b => b.remove());
+// 최근 3개월 / 직전 3개월 / 1년 전 같은 3개월 요약
+function summarize(series) {
+  const done = series.filter(r => r.month < INDEX.incomplete_from);   // 신고가 끝난 달만
+  const last3 = done.slice(-3), prev3 = done.slice(-6, -3), yago3 = done.slice(-15, -12);
+  const f = mainField();
+  const cur = pooled(last3, f);
+  return {
+    cur, prevPct: pctNum(cur, pooled(prev3, f)), yoyPct: pctNum(cur, pooled(yago3, f)),
+    n3: last3.reduce((a, r) => a + (r.n || 0), 0),
+    nPrev: prev3.reduce((a, r) => a + (r.n || 0), 0),
+    price: pooled(last3, priceField()),
+    range: last3.length ? `${last3[0].month} ~ ${last3[last3.length - 1].month}` : "",
+  };
+}
+function fmtMain(v) { return state.deal === "wolse" ? (v == null ? "-" : Math.round(v) + "만원") : won(v); }
+const mainLabel = () => state.deal === "wolse" ? "월세 (중위)" : "3.3㎡당 " + (state.deal === "trade" ? "가격" : "보증금");
+
+/* ───────── 화면: 선택 상자 ───────── */
+function drawSelectors() {
+  const gs = document.getElementById("guSel");
+  const sorted = [...INDEX.gu].sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  gs.innerHTML = `<option value="all">서울 전체</option>` +
+    sorted.map(g => `<option value="${g.code}">${esc(g.name)}</option>`).join("");
+  gs.value = state.gu;
+
+  const ds = document.getElementById("dongSel");
+  if (state.gu === "all") {
+    ds.innerHTML = `<option value="all">구를 먼저 고르세요</option>`;
+    ds.disabled = true;
+  } else {
+    const g = INDEX.gu.find(x => x.code === state.gu);
+    ds.innerHTML = `<option value="all">${esc(g.name)} 전체</option>` +
+      g.dongs.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join("");
+    ds.disabled = false;
+    ds.value = state.dong;
+  }
+
+  const mk = (id, items, key) => {
+    const bar = document.getElementById(id);
+    bar.innerHTML = "";
     Object.entries(items).forEach(([k, label]) => {
       const b = document.createElement("button");
       b.textContent = label;
       b.className = state[key] === k ? "on" : "";
-      b.onclick = () => { state[key] = k; render(); };
+      b.onclick = () => setState({ [key]: k });
       bar.appendChild(b);
     });
   };
-  mk("areaBar", Object.fromEntries(AREAS.map(a => [a, a])), "area");
   mk("typeBar", TYPES, "type");
   mk("dealBar", DEALS, "deal");
 }
 
-function currentSeries() {
-  const block = DATA.areas[state.area][state.type];
-  return monthSeries(block[state.deal] || {});
-}
-
-// 주요 지표 이름: 매매·전세는 3.3㎡당, 월세는 월세액
-function mainField() {
-  return state.deal === "wolse" ? "rent" : "ppy";
-}
-
+/* ───────── 화면: 카드 ───────── */
 function drawCards(series) {
-  const el = document.getElementById("cards");
-  // 신고가 덜 끝난 최근 달은 빼고 '완결된' 달 기준으로 비교
-  const done = series.filter(r => r.month < DATA.incomplete_from);
-  const last3 = done.slice(-3), prev3 = done.slice(-6, -3), yago3 = done.slice(-15, -12);
-  const f = mainField();
-  const cur = pooled(last3, f), prev = pooled(prev3, f), ya = pooled(yago3, f);
-  const n3 = last3.reduce((a, r) => a + (r.n || 0), 0);
-  const nPrev = prev3.reduce((a, r) => a + (r.n || 0), 0);
-  const priceField = state.deal === "trade" ? "price" : "deposit";
-  const curPrice = pooled(last3, priceField);
-  const range = last3.length ? `${last3[0].month} ~ ${last3[last3.length - 1].month}` : "";
-
-  const mainLabel = state.deal === "wolse" ? "월세 (중위)" : "3.3㎡당 " + (state.deal === "trade" ? "가격" : "보증금");
-  const mainVal = state.deal === "wolse" ? (cur == null ? "-" : Math.round(cur) + "만원") : won(cur == null ? null : Math.round(cur));
+  const s = summarize(series);
   const priceLabel = state.deal === "trade" ? "거래가 (중위)" : "보증금 (중위)";
-
-  el.innerHTML = `
-    <div class="card"><div class="t">${mainLabel}</div><div class="v">${mainVal}</div><div class="s">최근 3개월 · ${range}</div></div>
-    <div class="card"><div class="t">직전 3개월 대비</div><div class="v">${pct(cur, prev)}</div><div class="s">${mainLabel.split(" ")[0]} 기준</div></div>
-    <div class="card"><div class="t">1년 전 대비</div><div class="v">${pct(cur, ya)}</div><div class="s">같은 3개월 비교</div></div>
-    <div class="card"><div class="t">거래 건수 (3개월)</div><div class="v">${n3.toLocaleString()}건</div><div class="s">직전 3개월 ${nPrev}건 · ${priceLabel} ${won(curPrice == null ? null : Math.round(curPrice))}</div></div>`;
+  document.getElementById("cards").innerHTML = `
+    <div class="card"><div class="t">${mainLabel()}</div><div class="v">${fmtMain(s.cur)}</div><div class="s">최근 3개월 · ${s.range}</div></div>
+    <div class="card"><div class="t">직전 3개월 대비</div><div class="v">${pct(s.prevPct)}</div><div class="s">${mainLabel().split(" ")[0]} 기준</div></div>
+    <div class="card"><div class="t">1년 전 대비</div><div class="v">${pct(s.yoyPct)}</div><div class="s">같은 3개월 비교</div></div>
+    <div class="card"><div class="t">거래 건수 (3개월)</div><div class="v">${s.n3.toLocaleString()}건</div><div class="s">직전 3개월 ${s.nPrev.toLocaleString()}건 · ${priceLabel} ${won(s.price)}</div></div>`;
 }
 
-function drawChart(series) {
+/* ───────── 화면: 그래프 ───────── */
+function drawChart(node, series) {
   const f = mainField();
   const labels = series.map(r => r.month.slice(2).replace("-", "."));
-  const incomplete = series.map(r => r.month >= DATA.incomplete_from);
-  // 3개월 이동평균 (건수 가중)
-  const ma = series.map((_, i) => {
-    const win = series.slice(Math.max(0, i - 2), i + 1);
-    const v = pooled(win, f);
+  const incomplete = series.map(r => r.month >= INDEX.incomplete_from);
+  const ma = series.map((_, i) => {     // 3개월 이동평균
+    const v = pooled(series.slice(Math.max(0, i - 2), i + 1), f);
     return v == null ? null : Math.round(v);
   });
-  const lineName = state.deal === "wolse" ? "월세 중위 (만원)" : `3.3㎡당 ${state.deal === "trade" ? "가격" : "보증금"} 중위 (만원)`;
-
-  document.getElementById("chartTitle").textContent =
-    `${state.area} ${TYPES[state.type]} ${DEALS[state.deal]} 월별 추이`;
+  const lineName = state.deal === "wolse" ? "월세 중위 (만원)" : `${mainLabel()} 중위 (만원)`;
+  document.getElementById("chartTitle").textContent = `${node.name} ${TYPES[state.type]} ${DEALS[state.deal]} 월별 추이`;
   document.getElementById("chartNote").textContent =
     "막대: 월별 거래 건수 · 점: 월별 중위값 · 선: 3개월 이동평균. 옅은 막대는 신고 기한이 끝나지 않은 달입니다.";
 
@@ -241,7 +335,7 @@ function drawChart(series) {
       plugins: {
         legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 12 } } },
         tooltip: { callbacks: { label: c => c.dataset.yAxisID === "y2"
-          ? ` 거래 ${c.raw}건` : ` ${c.dataset.label}: ${c.raw == null ? "-" : c.raw.toLocaleString()}만원` } },
+          ? ` 거래 ${c.raw.toLocaleString()}건` : ` ${c.dataset.label}: ${c.raw == null ? "-" : c.raw.toLocaleString()}만원` } },
       },
       scales: {
         y: { position: "left", ticks: { callback: v => v.toLocaleString() }, title: { display: true, text: "만원" } },
@@ -252,53 +346,115 @@ function drawChart(series) {
   });
 }
 
-function drawRecent() {
-  const block = DATA.areas[state.area][state.type];
+/* ───────── 화면: 하위 지역 비교표 ───────── */
+function drawCompare(node) {
+  const box = document.getElementById("compareBox");
+  if (!node.children) { box.style.display = "none"; return; }
+  box.style.display = "";
+  document.getElementById("compareTitle").innerHTML =
+    `${node.childLabel} 비교 <small>최근 3개월 ${mainLabel()} 높은 순 · 줄을 누르면 그 지역으로 이동</small>`;
+
+  const rows = Object.keys(node.children).map(k => {
+    const ser = monthSeries((node.children[k][state.type] || {})[state.deal]);
+    return { key: k, name: node.childName(k), ...summarize(ser) };
+  }).filter(r => r.n3 > 0 || r.nPrev > 0);
+  rows.sort((a, b) => (b.n3 >= FEW) - (a.n3 >= FEW) || (b.cur ?? -1) - (a.cur ?? -1));
+
+  const el = document.getElementById("compare");
+  if (!rows.length) { el.innerHTML = '<div class="empty">비교할 거래가 없습니다.</div>'; return; }
+  el.innerHTML = `<table><thead><tr><th>#</th><th>${node.childLabel === "구별" ? "구" : "동"}</th>
+      <th class="num">${mainLabel()}</th><th class="num">직전 3개월 대비</th><th class="num">1년 전 대비</th><th class="num">거래(3개월)</th></tr></thead><tbody>` +
+    rows.map((r, i) => `<tr class="click${r.n3 < FEW ? " few" : ""}" data-key="${esc(r.key)}">
+      <td>${r.n3 >= FEW ? i + 1 : "-"}</td><td>${esc(r.name)}</td><td class="num">${fmtMain(r.cur)}</td>
+      <td class="num">${pct(r.prevPct)}</td><td class="num">${pct(r.yoyPct)}</td>
+      <td class="num">${r.n3.toLocaleString()}${r.n3 < FEW ? " (적음)" : ""}</td></tr>`).join("") + "</tbody></table>";
+  el.querySelectorAll("tr.click").forEach(tr => tr.onclick = () => {
+    const k = tr.dataset.key;
+    setState(node.childKey === "gu" ? { gu: k, dong: "all" } : { dong: k });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+}
+
+/* ───────── 화면: 최근 거래 ───────── */
+function drawRecent(node) {
   const el = document.getElementById("recent");
-  let rows = state.deal === "trade" ? block.recent_trade : block.recent_rent;
+  const block = (node.recent || {})[state.type] || { trade: [], rent: [] };
+  let rows = state.deal === "trade" ? block.trade : block.rent;
   if (state.deal === "jeonse") rows = rows.filter(r => !r.rent);
   if (state.deal === "wolse") rows = rows.filter(r => r.rent);
   rows = rows.slice(0, 15);
-  if (!rows.length) { el.innerHTML = '<div class="empty">최근 신고된 거래가 없습니다.</div>'; return; }
+  if (!rows.length) { el.innerHTML = '<div class="empty">최근 3개월 사이 신고된 거래가 없습니다.</div>'; return; }
 
+  const showGu = state.gu === "all";
   const priceHead = state.deal === "trade" ? "거래가" : state.deal === "jeonse" ? "보증금" : "보증금 / 월세";
-  el.innerHTML = `<table><thead><tr><th>계약일</th><th>동</th><th>단지·건물</th><th class="num">전용㎡</th><th class="num">층</th><th class="num">${priceHead}</th></tr></thead><tbody>` +
+  el.innerHTML = `<table><thead><tr><th>계약일</th>${showGu ? "<th>구</th>" : ""}<th>동</th><th>단지·건물</th>
+      <th class="num">전용㎡</th><th class="num">층</th><th class="num">${priceHead}</th></tr></thead><tbody>` +
     rows.map(r => {
       const price = state.deal === "trade"
         ? (r.cancelled ? `<span class="cx">${won(r.price)}</span> (해제)` : won(r.price))
         : state.deal === "jeonse" ? won(r.deposit) : `${won(r.deposit)} / ${r.rent}만`;
-      return `<tr><td>${r.date.slice(2).replaceAll("-", ".")}</td><td>${r.dong}</td><td>${r.name || "-"}</td>
+      return `<tr><td>${r.date.slice(2).replaceAll("-", ".")}</td>${showGu ? `<td>${esc(r.gu)}</td>` : ""}
+        <td>${esc(r.dong)}</td><td>${esc(r.name) || "-"}</td>
         <td class="num">${r.area ?? "-"}</td><td class="num">${r.floor ?? "-"}</td><td class="num">${price}</td></tr>`;
     }).join("") + "</tbody></table>";
 }
 
-function render() {
-  drawButtons();
-  const series = currentSeries();
-  if (!series.length) {
-    document.getElementById("cards").innerHTML = "";
-    if (chart) { chart.destroy(); chart = null; }
-    document.getElementById("chartTitle").textContent = `${state.area} ${TYPES[state.type]} ${DEALS[state.deal]}`;
-    document.getElementById("chartNote").textContent = "이 조건에 해당하는 거래 자료가 없습니다.";
-  } else {
-    drawCards(series);
-    drawChart(series);
-  }
-  drawRecent();
+/* ───────── 블로그 iframe 높이 맞추기 ───────── */
+// 블로그 글에 높이 조절 스크립트가 있으면 이 높이에 맞춰 iframe 을 늘려 준다
+function postHeight() {
+  try { parent.postMessage({ type: "numeco-dash-height", height: document.documentElement.scrollHeight }, "*"); } catch (e) {}
 }
 
-/* ───────── 시작: 데이터 불러오기 ───────── */
-fetch("data/summary.json?v=" + Date.now())
-  .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-  .then(d => {
-    DATA = d;
-    document.getElementById("updated").textContent = "마지막 갱신 " + d.updated;
-    render();
-  })
-  .catch(() => {
+/* ───────── 전체 그리기 ───────── */
+async function render() {
+  if (state.gu !== "all" && !GU_CACHE[state.gu]) {
+    document.getElementById("cards").innerHTML = '<div class="empty" style="grid-column:1/-1">불러오는 중…</div>';
+    try { await loadGu(state.gu); }
+    catch (e) { state.gu = "all"; state.dong = "all"; }
+  }
+  drawSelectors();
+  const node = currentNode();
+  const series = monthSeries(((node.series || {})[state.type] || {})[state.deal]);
+  if (!series.length) {
+    document.getElementById("cards").innerHTML = '<div class="empty" style="grid-column:1/-1">이 조건에 해당하는 거래 자료가 없습니다.</div>';
+    if (chart) { chart.destroy(); chart = null; }
+    document.getElementById("chartTitle").textContent = `${node.name} ${TYPES[state.type]} ${DEALS[state.deal]}`;
+    document.getElementById("chartNote").textContent = "";
+  } else {
+    drawCards(series);
+    drawChart(node, series);
+  }
+  drawCompare(node);
+  drawRecent(node);
+  setTimeout(postHeight, 300);
+}
+
+function setState(patch) {
+  state = sanitize({ ...state, ...patch });
+  saveState();
+  render();
+}
+
+/* ───────── 시작 ───────── */
+document.getElementById("guSel").onchange = e => setState({ gu: e.target.value, dong: "all" });
+document.getElementById("dongSel").onchange = e => setState({ dong: e.target.value });
+document.getElementById("resetLink").onclick = () => setState({ ...DEFAULT });
+window.addEventListener("resize", () => setTimeout(postHeight, 200));
+
+(async () => {
+  try {
+    INDEX = await getJSON("data/site/index.json");
+    SEOUL = await getJSON("data/site/seoul.json");
+  } catch (e) {
     document.getElementById("updated").textContent = "데이터를 아직 받지 못했습니다";
     document.getElementById("cards").innerHTML = '<div class="empty" style="grid-column:1/-1">첫 자료 수집이 끝나면 여기에 표시됩니다.</div>';
-  });
+    return;
+  }
+  document.getElementById("updated").textContent = "마지막 갱신 " + INDEX.updated;
+  // 우선순위: 주소에 적힌 지역 > 이 브라우저에 저장된 설정 > 기본(서울 전체)
+  state = sanitize(fromUrl() || loadSaved() || DEFAULT);
+  render();
+})();
 </script>
 </body>
 </html>
