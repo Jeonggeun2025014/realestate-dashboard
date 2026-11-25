@@ -1,4 +1,4 @@
-# 매일 아침 실거래가 자료를 새로 받아 대시보드 데이터를 갱신하는 자동 작업
+# 매일 아침 서울 실거래가 자료를 새로 받아 대시보드 데이터를 갱신하는 자동 작업
 name: 실거래가 데이터 갱신
 
 on:
@@ -7,15 +7,23 @@ on:
   workflow_dispatch:         # Actions 탭에서 직접 실행할 수도 있음
     inputs:
       months:
-        description: "다시 받을 최근 개월 수"
+        description: "매번 다시 받을 최근 개월 수"
         default: "3"
+      budget:
+        description: "과거 자료 채우기에 쓸 최대 시간(분)"
+        default: "300"
 
 permissions:
   contents: write            # 받은 데이터를 저장소에 커밋하기 위해 필요
 
+concurrency:                 # 두 작업이 동시에 돌며 충돌하지 않도록
+  group: data-update
+  cancel-in-progress: false
+
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
 
@@ -29,15 +37,18 @@ jobs:
       - name: 실거래 자료 받기
         env:
           DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
-        run: python scripts/fetch_data.py --months "${{ github.event.inputs.months || '3' }}"
+        run: >
+          python scripts/fetch_data.py
+          --months "${{ github.event.inputs.months || '3' }}"
+          --budget "${{ github.event.inputs.budget || '50' }}"
 
-      - name: 대시보드용 요약 만들기
-        run: python scripts/build_summary.py
+      - name: 대시보드용 파일 만들기
+        run: python scripts/build_site.py
 
       - name: 바뀐 데이터 커밋
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data
+          git add -A data
           git diff --cached --quiet || git commit -m "데이터 갱신 $(TZ=Asia/Seoul date +'%Y-%m-%d %H:%M')"
           git push
