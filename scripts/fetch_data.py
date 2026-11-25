@@ -183,16 +183,16 @@ def main():
     if not key:
         sys.exit("환경변수 DATA_GO_KR_KEY 가 없습니다 (GitHub Secrets 확인).")
 
-    # 저장된 자료가 하나도 없으면 첫 실행으로 보고 36개월치를 받는다
-    months = args.months
-    if not any(DATA_DIR.rglob("*.json")):
-        months = max(months, FIRST_RUN_MONTHS)
-        print(f"첫 실행: 최근 {months}개월치를 받습니다.")
-
-    failures = 0
+    failures, total_calls = 0, 0
     for kind, path in APIS.items():
+        # 이 종류의 자료가 아직 하나도 없으면(첫 실행이거나 새로 승인된 API) 36개월치를 받는다
+        months = args.months
+        if not any((DATA_DIR / kind).rglob("*.json")):
+            months = max(months, FIRST_RUN_MONTHS)
+            print(f"{kind}: 저장된 자료가 없어 최근 {months}개월치를 받습니다.")
         for lawd_cd, gu in REGIONS.items():
             for ym in recent_months(months):
+                total_calls += 1
                 try:
                     recs = fetch_month(kind, path, key, lawd_cd, ym)
                     save_month(kind, lawd_cd, ym, recs)
@@ -204,7 +204,7 @@ def main():
 
     print(f"완료. 실패 {failures}건")
     # 전부 실패했다면 키 문제일 가능성이 크므로 작업을 실패로 표시
-    total_calls = len(APIS) * len(REGIONS) * months
+    # (일부 API만 실패하면 403 = 해당 API 활용신청 미승인일 가능성이 큼)
     if failures == total_calls:
         sys.exit("모든 호출이 실패했습니다. 인증키나 활용신청 상태를 확인하세요.")
 
