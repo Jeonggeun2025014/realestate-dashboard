@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: write            # 받은 데이터를 저장소에 커밋하기 위해 필요
+  pages: write               # 커밋 후 GitHub Pages 다시 배포를 요청하기 위해 필요
 
 concurrency:                 # 두 작업이 동시에 돌며 충돌하지 않도록
   group: data-update
@@ -52,3 +53,9 @@ jobs:
           git add -A data
           git diff --cached --quiet || git commit -m "데이터 갱신 $(TZ=Asia/Seoul date +'%Y-%m-%d %H:%M')"
           git push
+
+      # 자동 작업이 만든 커밋은 Pages 배포를 스스로 일으키지 않으므로 직접 요청한다
+      - name: 웹페이지 다시 배포 요청
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" || echo "배포 요청 실패(다음 커밋 때 반영됨)"
