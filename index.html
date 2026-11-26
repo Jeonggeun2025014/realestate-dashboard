@@ -28,6 +28,9 @@
   .bar button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 14px;font-size:14px;cursor:pointer;color:var(--text)}
   .bar button.on{background:var(--navy);border-color:var(--navy);color:#fff;font-weight:600}
   .bar.deal button.on{background:var(--blue);border-color:var(--blue)}
+  .bar.band button.on{background:#b7791f;border-color:#b7791f}
+  .bar button small{font-size:11px;opacity:.75;margin-left:3px}
+  .tag{display:inline-block;font-size:11px;padding:1px 6px;border-radius:6px;background:#eef2f7;color:#334155;white-space:nowrap}
   .hint{font-size:12px;color:var(--sub);margin:6px 0 0}
   .hint a{color:var(--blue);cursor:pointer;text-decoration:underline}
 
@@ -85,6 +88,10 @@
   <div class="bar" id="typeBar"></div>
   <div class="lbl">거래 유형</div>
   <div class="bar deal" id="dealBar"></div>
+  <div id="bandWrap">
+    <div class="lbl">평형 (전용면적 기준)</div>
+    <div class="bar band" id="bandBar"></div>
+  </div>
   <p class="hint">고른 설정은 이 브라우저에 저장되어 다음 방문 때 바로 보입니다. <a id="resetLink">처음 화면으로</a></p>
 
   <!-- 요약 카드 -->
@@ -115,6 +122,7 @@
     · 가격은 모두 <b>중위값</b>(거래를 가격순으로 세웠을 때 가운데 값)입니다. 비싼 거래 한두 건에 평균이 크게 흔들리는 것을 줄이기 위해서입니다.<br>
     · <b>3.3㎡당 가격</b>은 전용면적 기준입니다. 넓이가 다른 집을 비교할 때 유용합니다.<br>
     · 변화율은 <b>최근 3개월 vs 직전 3개월</b>, <b>최근 3개월 vs 1년 전 같은 3개월</b>을 비교합니다. 월별 숫자보다 덜 흔들립니다.<br>
+    · <b>평형</b>은 전용면적 기준입니다: 소형 40㎡ 이하, 59㎡형 40~60㎡(24평형 안팎), 84㎡형 60~85㎡(33평형 안팎), 대형 85㎡ 초과. 넓이가 다른 집을 섞으면 가격 흐름이 흐려지므로 같은 평형끼리 비교하는 것을 권합니다.<br>
     · 동은 법정동 기준이며, 문래동1가~6가처럼 나뉜 동은 하나로 합쳤습니다.<br><br>
     <b>주의</b><br>
     · 실거래는 <b>계약 후 30일 안에</b> 신고되므로, 최근 1~2개월은 거래가 아직 덜 잡혀 있습니다(그래프에서 옅게 표시). 시간이 지나며 숫자가 바뀝니다.<br>
@@ -129,7 +137,17 @@
 /* ───────── 설정 ───────── */
 const TYPES = { apt: "아파트", offi: "오피스텔", rh: "연립다세대(빌라)" };
 const DEALS = { trade: "매매", jeonse: "전세", wolse: "월세" };
-const DEFAULT = { gu: "all", dong: "all", type: "apt", deal: "trade" };
+// 평형대: 전용면적 기준 (괄호 안은 흔히 부르는 공급면적 평형)
+const BANDS = {
+  all: { label: "전체", hint: "" },
+  s:   { label: "소형", hint: "40㎡ 이하", short: "소형" },
+  m:   { label: "59㎡형", hint: "24평형 안팎", short: "59형" },
+  l:   { label: "84㎡형", hint: "33평형 안팎", short: "84형" },
+  x:   { label: "대형", hint: "85㎡ 초과", short: "대형" },
+};
+// 주택 유형을 바꾸면 그 유형에서 가장 흔한 평형대를 먼저 보여준다
+const TYPE_BAND = { apt: "l", offi: "s", rh: "m" };
+const DEFAULT = { gu: "all", dong: "all", type: "apt", deal: "trade", band: "l" };
 const STORE_KEY = "numeco-seoul-dash-v1";
 const FEW = 5;                         // 3개월 거래가 이보다 적으면 '표본 적음'
 
@@ -170,8 +188,9 @@ function fromUrl() {
     if (g) out.gu = g.code;
     if (g && q.get("dong") && g.dongs.includes(q.get("dong"))) out.dong = q.get("dong");
   }
-  if (TYPES[q.get("type")]) out.type = q.get("type");
+  if (TYPES[q.get("type")]) { out.type = q.get("type"); out.band = TYPE_BAND[out.type]; }
   if (DEALS[q.get("deal")]) out.deal = q.get("deal");
+  if (BANDS[q.get("band")]) out.band = q.get("band");
   return Object.keys(out).length ? out : null;
 }
 
@@ -183,6 +202,8 @@ function sanitize(s) {
   else if (st.dong !== "all" && !g.dongs.includes(st.dong)) st.dong = "all";
   if (!TYPES[st.type]) st.type = DEFAULT.type;
   if (!DEALS[st.deal]) st.deal = DEFAULT.deal;
+  if (!BANDS[st.band]) st.band = TYPE_BAND[st.type];
+  if (!INDEX.bands) st.band = "all";   // 평형별 자료가 아직 준비 안 됐으면 전체만
   return st;
 }
 
@@ -217,15 +238,21 @@ function currentNode() {
 }
 
 /* ───────── 계산 도우미 ───────── */
-function monthSeries(obj) {             // {월: 통계} → 빈 달 없이 정렬된 배열
-  const keys = Object.keys(obj || {}).sort();
+// 한 달치 값에서 지금 고른 평형대 통계를 꺼낸다 (예전 형식 {n:..} 도 '전체'로 읽음)
+function pickBand(v) {
+  if (!v) return null;
+  if ("n" in v) return state.band === "all" ? v : null;
+  return v[state.band] || null;
+}
+function monthSeries(obj) {             // {월: {평형대: 통계}} → 빈 달 없이 정렬된 배열
+  const keys = Object.keys(obj || {}).filter(k => pickBand(obj[k])).sort();
   if (!keys.length) return [];
   const out = [];
   let [y, m] = keys[0].split("-").map(Number);
   const last = keys[keys.length - 1];
   while (true) {
     const k = `${y}-${String(m).padStart(2, "0")}`;
-    out.push({ month: k, ...(obj[k] || { n: 0 }) });
+    out.push({ month: k, ...(pickBand(obj[k]) || { n: 0 }) });
     if (k === last) break;
     m++; if (m > 12) { m = 1; y++; }
   }
@@ -283,13 +310,34 @@ function drawSelectors() {
       const b = document.createElement("button");
       b.textContent = label;
       b.className = state[key] === k ? "on" : "";
-      b.onclick = () => setState({ [key]: k });
+      // 주택 유형을 바꾸면 평형대도 그 유형의 대표 평형으로 맞춘다
+      b.onclick = () => setState(key === "type" ? { type: k, band: TYPE_BAND[k] } : { [key]: k });
       bar.appendChild(b);
     });
   };
   mk("typeBar", TYPES, "type");
   mk("dealBar", DEALS, "deal");
+
+  // 평형대 버튼 (평형별 자료가 준비된 뒤에만 보임)
+  const wrap = document.getElementById("bandWrap");
+  wrap.style.display = INDEX.bands ? "" : "none";
+  const bb = document.getElementById("bandBar");
+  bb.innerHTML = "";
+  Object.entries(BANDS).forEach(([k, b]) => {
+    const el = document.createElement("button");
+    el.innerHTML = esc(b.label) + (b.hint ? `<small>${esc(b.hint)}</small>` : "");
+    el.className = state.band === k ? "on" : "";
+    el.onclick = () => setState({ band: k });
+    bb.appendChild(el);
+  });
 }
+
+// 전용면적 → 평형대 기호 (수집 스크립트의 size_band 와 같은 기준)
+function sizeBand(a) {
+  if (a == null) return null;
+  return a <= 40 ? "s" : a <= 60 ? "m" : a <= 85 ? "l" : "x";
+}
+const bandText = () => state.band === "all" ? "" : ` ${BANDS[state.band].label}`;
 
 /* ───────── 화면: 카드 ───────── */
 function drawCards(series) {
@@ -312,7 +360,7 @@ function drawChart(node, series) {
     return v == null ? null : Math.round(v);
   });
   const lineName = state.deal === "wolse" ? "월세 중위 (만원)" : `${mainLabel()} 중위 (만원)`;
-  document.getElementById("chartTitle").textContent = `${node.name} ${TYPES[state.type]} ${DEALS[state.deal]} 월별 추이`;
+  document.getElementById("chartTitle").textContent = `${node.name} ${TYPES[state.type]}${bandText()} ${DEALS[state.deal]} 월별 추이`;
   document.getElementById("chartNote").textContent =
     "막대: 월별 거래 건수 · 점: 월별 중위값 · 선: 3개월 이동평균. 옅은 막대는 신고 기한이 끝나지 않은 달입니다.";
 
@@ -352,7 +400,7 @@ function drawCompare(node) {
   if (!node.children) { box.style.display = "none"; return; }
   box.style.display = "";
   document.getElementById("compareTitle").innerHTML =
-    `${node.childLabel} 비교 <small>최근 3개월 ${mainLabel()} 높은 순 · 줄을 누르면 그 지역으로 이동</small>`;
+    `${node.childLabel} 비교 <small>${TYPES[state.type]}${bandText()} ${DEALS[state.deal]} · 최근 3개월 ${mainLabel()} 높은 순 · 줄을 누르면 그 지역으로 이동</small>`;
 
   const rows = Object.keys(node.children).map(k => {
     const ser = monthSeries((node.children[k][state.type] || {})[state.deal]);
@@ -382,20 +430,21 @@ function drawRecent(node) {
   let rows = state.deal === "trade" ? block.trade : block.rent;
   if (state.deal === "jeonse") rows = rows.filter(r => !r.rent);
   if (state.deal === "wolse") rows = rows.filter(r => r.rent);
+  if (state.band !== "all") rows = rows.filter(r => sizeBand(r.area) === state.band);   // 고른 평형대만
   rows = rows.slice(0, 15);
-  if (!rows.length) { el.innerHTML = '<div class="empty">최근 3개월 사이 신고된 거래가 없습니다.</div>'; return; }
+  if (!rows.length) { el.innerHTML = `<div class="empty">최근 3개월 사이 신고된${bandText()} 거래가 없습니다.</div>`; return; }
 
   const showGu = state.gu === "all";
   const priceHead = state.deal === "trade" ? "거래가" : state.deal === "jeonse" ? "보증금" : "보증금 / 월세";
-  el.innerHTML = `<table><thead><tr><th>계약일</th>${showGu ? "<th>구</th>" : ""}<th>동</th><th>단지·건물</th>
+  el.innerHTML = `<table><thead><tr><th>계약일</th>${showGu ? "<th>구</th>" : ""}<th>동</th><th>단지·건물</th><th>평형</th>
       <th class="num">전용㎡</th><th class="num">층</th><th class="num">${priceHead}</th></tr></thead><tbody>` +
     rows.map(r => {
       const price = state.deal === "trade"
         ? (r.cancelled ? `<span class="cx">${won(r.price)}</span> (해제)` : won(r.price))
         : state.deal === "jeonse" ? won(r.deposit) : `${won(r.deposit)} / ${r.rent}만`;
       return `<tr><td>${r.date.slice(2).replaceAll("-", ".")}</td>${showGu ? `<td>${esc(r.gu)}</td>` : ""}
-        <td>${esc(r.dong)}</td><td>${esc(r.name) || "-"}</td>
-        <td class="num">${r.area ?? "-"}</td><td class="num">${r.floor ?? "-"}</td><td class="num">${price}</td></tr>`;
+        <td>${esc(r.dong)}</td><td>${esc(r.name) || "-"}</td><td><span class="tag">${(BANDS[sizeBand(r.area)] || {}).short || "-"}</span></td>
+        <td class="num">${r.area == null ? "-" : (+r.area).toFixed(1)}</td><td class="num">${r.floor ?? "-"}</td><td class="num">${price}</td></tr>`;
     }).join("") + "</tbody></table>";
 }
 
@@ -418,7 +467,7 @@ async function render() {
   if (!series.length) {
     document.getElementById("cards").innerHTML = '<div class="empty" style="grid-column:1/-1">이 조건에 해당하는 거래 자료가 없습니다.</div>';
     if (chart) { chart.destroy(); chart = null; }
-    document.getElementById("chartTitle").textContent = `${node.name} ${TYPES[state.type]} ${DEALS[state.deal]}`;
+    document.getElementById("chartTitle").textContent = `${node.name} ${TYPES[state.type]}${bandText()} ${DEALS[state.deal]}`;
     document.getElementById("chartNote").textContent = "";
   } else {
     drawCards(series);
