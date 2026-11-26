@@ -197,23 +197,58 @@ def per_pyeong(amount, area):
 
 
 def make_stats(kind, recs):
-    """거래 묶음 → {'trade': {...}} 또는 {'jeonse': {...}, 'wolse': {...}}"""
+    """거래 묶음 → {거래유형: {평형대: 통계}}
+    예) {'trade': {'all': {...}, 'l': {...}}} 또는 {'jeonse': {...}, 'wolse': {...}}"""
+    def trade_stat(rs):
+        return {"n": len(rs),
+                "price": median(r["price"] for r in rs),
+                "ppy": median(per_pyeong(r["price"], r["area"]) for r in rs)}
+
+    def jeonse_stat(rs):
+        return {"n": len(rs), "deposit": median(r["deposit"] for r in rs),
+                "ppy": median(per_pyeong(r["deposit"], r["area"]) for r in rs)}
+
+    def wolse_stat(rs):
+        return {"n": len(rs), "deposit": median(r["deposit"] for r in rs),
+                "rent": median(r["rent"] for r in rs)}
+
     if kind.endswith("_trade"):
-        rs = [r for r in recs if not r["cancelled"]]
-        if not rs:
-            return {}
-        return {"trade": {"n": len(rs),
-                          "price": median(r["price"] for r in rs),
-                          "ppy": median(per_pyeong(r["price"], r["area"]) for r in rs)}}
+        groups = {"trade": ([r for r in recs if not r["cancelled"]], trade_stat)}
+    else:
+        groups = {"jeonse": ([r for r in recs if not r["rent"]], jeonse_stat),
+                  "wolse": ([r for r in recs if r["rent"]], wolse_stat)}
+
     out = {}
-    j = [r for r in recs if not r["rent"]]
-    w = [r for r in recs if r["rent"]]
-    if j:
-        out["jeonse"] = {"n": len(j), "deposit": median(r["deposit"] for r in j),
-                         "ppy": median(per_pyeong(r["deposit"], r["area"]) for r in j)}
-    if w:
-        out["wolse"] = {"n": len(w), "deposit": median(r["deposit"] for r in w),
-                        "rent": median(r["rent"] for r in w)}
+    for deal, (rs, fn) in groups.items():
+        by_band = by_size_band(rs, fn)
+        if by_band:
+            out[deal] = by_band
+    return out
+
+
+def size_band(area):
+    """전용면적 → 평형대 기호
+    s: 40㎡ 이하(원룸·투룸) / m: 40~60㎡(59㎡형) / l: 60~85㎡(84㎡형) / x: 85㎡ 초과(대형)"""
+    if area is None:
+        return None
+    if area <= 40:
+        return "s"
+    if area <= 60:
+        return "m"
+    if area <= 85:
+        return "l"
+    return "x"
+
+
+def by_size_band(recs, stat_fn):
+    """전체('all')와 평형대별로 통계를 낸다. 거래가 없는 평형대는 뺀다."""
+    if not recs:
+        return {}
+    out = {"all": stat_fn(recs)}
+    for band in ("s", "m", "l", "x"):
+        sub = [r for r in recs if size_band(r["area"]) == band]
+        if sub:
+            out[band] = stat_fn(sub)
     return out
 
 
