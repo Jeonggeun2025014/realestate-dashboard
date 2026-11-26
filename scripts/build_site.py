@@ -21,7 +21,7 @@ RECENT_DIR = ROOT / "data" / "recent"
 SITE_DIR = ROOT / "data" / "site"
 
 HOUSE_TYPES = ["apt", "offi", "rh"]
-SEOUL_RECENT = 40   # 서울 전체 화면에 보여줄 최근 거래 수
+SEOUL_RECENT = 150  # 서울 전체 화면용 최근 거래 수 (평형대로 걸러도 충분히 남도록)
 
 
 def read_json(path, default=None):
@@ -51,6 +51,17 @@ def build():
     gu_series = {code: empty_series() for code in SEOUL_GU}
     dong_series = {code: {} for code in SEOUL_GU}
 
+    # 예전 형식(평형 구분 없이 통계 하나)이 섞여 있으면 화면에 평형 버튼을 숨기기 위해 표시
+    all_banded = True
+
+    def as_bands(st):
+        """예전 형식 {'n':..} 은 {'all': {'n':..}} 으로 맞춘다."""
+        nonlocal all_banded
+        if "n" in st:
+            all_banded = False
+            return {"all": st}
+        return st
+
     # ── 월별 집계를 지역별 시계열로 재배치 ──
     for ht, m in load_months():
         month = f"{m['ym'][:4]}-{m['ym'][4:]}"
@@ -59,12 +70,12 @@ def build():
             if not block:
                 continue
             if block.get("seoul"):
-                seoul[ht][deal][month] = block["seoul"]
+                seoul[ht][deal][month] = as_bands(block["seoul"])
             for code, st in block.get("gu", {}).items():
-                gu_series[code][ht][deal][month] = st
+                gu_series[code][ht][deal][month] = as_bands(st)
             for code, dongs in block.get("dong", {}).items():
                 for dong, st in dongs.items():
-                    dong_series[code].setdefault(dong, empty_series())[ht][deal][month] = st
+                    dong_series[code].setdefault(dong, empty_series())[ht][deal][month] = as_bands(st)
 
     # ── 최근 거래 목록 ──
     recent = {code: {ht: {"trade": [], "rent": []} for ht in HOUSE_TYPES} for code in SEOUL_GU}
@@ -82,7 +93,8 @@ def build():
         # 동 목록: 3년간 아파트 매매가 많은 순 → 많이 찾는 동이 위로
         def weight(d):
             s = dong_series[code][d]
-            return sum(v["n"] for ht in HOUSE_TYPES for deal in s[ht] for v in s[ht][deal].values())
+            return sum(v["all"]["n"] for ht in HOUSE_TYPES for deal in s[ht] for v in s[ht][deal].values()
+                       if "all" in v)
         dongs = sorted(dong_series[code], key=weight, reverse=True)
         index_gu.append({"code": code, "name": name, "dongs": dongs})
         write_json(SITE_DIR / f"{code}.json", {
@@ -110,6 +122,8 @@ def build():
         # 이 달부터는 신고 기한(30일)이 안 지나 거래가 덜 잡혀 있다
         "incomplete_from": (now.date() - dt.timedelta(days=30)).strftime("%Y-%m"),
         "gu": index_gu,
+        # True 이면 화면에 평형대(소형·59㎡형·84㎡형·대형) 버튼을 보여준다
+        "bands": all_banded,
     })
     size = sum(f.stat().st_size for f in SITE_DIR.glob("*.json")) / 1024
     print(f"data/site 생성: 파일 {len(list(SITE_DIR.glob('*.json')))}개, {size:,.0f} KB")
